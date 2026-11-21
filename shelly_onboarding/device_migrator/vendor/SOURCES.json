@@ -1,0 +1,12 @@
+{
+  "gen1.py": {
+    "repository": "https://github.com/bieniu/ha-shellies-discovery",
+    "commit": "b39551982e93a91d15854438e19bcb82f41fabf0",
+    "sha256": "34c04c8a5101fedf8b0928c8d753577174cc71723ec1277aab4036d52a544234"
+  },
+  "gen2.py": {
+    "repository": "https://github.com/bieniu/ha-shellies-discovery-gen2",
+    "commit": "b83aeb3a67c9e6cb4136e48bcdf5c656c58fc643",
+    "sha256": "0a299ad896205b4b9fce86f853469cad90c3ea12aad96cd934fd79624a3ebae9"
+  }
+}

@@ -1,0 +1,4 @@
+Includes unmodified source from bieniu/ha-shellies-discovery and bieniu/ha-shellies-discovery-gen2, Apache License 2.0.
+Authors: Maciej Bieniek and project contributors.
+Adapter changes: device_migrator/universal.py captures output, namespaces MQTT identities, preserves legacy dimmers and suppresses device-script installation.
+See README.md and SOURCES.json for pinned revisions.

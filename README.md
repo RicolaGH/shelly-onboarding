@@ -1,2 +1,38 @@
 # shelly-onboarding
 HASS App for semi-automatical on boarding of new shellies by ricola
+
+# Shelly Onboarding 0.1.0
+
+Eigenständige Home-Assistant-OS-App für WLAN-Steckdosen mit Shelly-RPC, einem Schaltausgang und einer Gerätekennung mit „Plug“ im App-Namen. Der Assistent erkennt Werks-WLANs, kopiert kompatible Einstellungen einer registrierten Vorlage und legt einen MQTT-Schalter an. Die MQTT-Integration in HA und ein erreichbarer Broker werden vorausgesetzt.
+
+## Installation
+
+**Lokal aus dem ZIP:** Archiv auf dem PC entpacken und den gesamten Ordner `shelly_onboarding` in die HA-Freigabe `addons` kopieren. Auf HA OS liegt danach `/addons/shelly_onboarding/config.yaml`. In Einstellungen → Apps → App-Store das Menü öffnen, nach Updates suchen bzw. den Store neu laden. Unter „Lokale Apps“ Shelly Onboarding installieren. Der erste Build benötigt Internetzugang für das Basisimage und die Python-Abhängigkeiten.
+
+**Als GitHub-Repository:** Den Inhalt des Archivs mit `repository.yaml` im Repository-Stamm auf dem Standardbranch bereitstellen. Repository-URL in Einstellungen → Apps → App-Store → Repositories eintragen. Der Supervisor muss das Repository lesen können. Unterstützte Build-Ziele sind aarch64 und amd64.
+
+## Profil und erster Plug
+
+1. In der App-Konfiguration die dedizierte WLAN-Schnittstelle, Ziel-SSID und WLAN-Passwort setzen. Der automatische Modus setzt eine primäre Ethernet-Verbindung, einen freien WLAN-Adapter, eine freie Route zu 192.168.33.0/24 und ein Werks-WLAN in Reichweite voraus. Nur der gewählte Adapter wird temporär konfiguriert. Nach dem Vorgang wird seine Werksnetzverbindung deaktiviert. Bei Installationen ohne freien Adapter kann ein bereits im Zielnetz eingebuchter Plug über seine private IPv4 und die bestätigte MAC eingerichtet werden.
+2. Broker als DNS-Name:Port, MQTT-Gerätebenutzer und Passwort eintragen. Für eigene CA „user_ca.pem“ wählen und das öffentliche CA-Zertifikat mit echten Zeilenumbrüchen in `ca_pem` hinterlegen (YAML-Editor: Blockwert mit `|`). „ca.pem“ nutzt die Hersteller-CA-Liste, „off“ unverschlüsseltes MQTT. Der Broker muss derselbe sein, den die HA-MQTT-Integration nutzt. Ein eigener Discovery-Präfix lässt sich einstellen. HA braucht Publish-Rechte für Discovery und Plug-Befehle, der Plug die passenden Rechte für seinen Topic-Zweig. Secrets nur in der lokalen App-Konfiguration ablegen.
+3. Starten, Oberfläche öffnen und den ersten Plug in der Nähe des Pi einstecken. Neue Werks-SSIDs erscheinen in der App und als persistente Benachrichtigung in HA. Für eine Vorlage ein registriertes Gerät auswählen, IP ergänzen, falls sie fehlt, und „Gerätekonfiguration lesen“ wählen. Ein geschütztes Vorbild kann das konfigurierte Shelly-Admin-Passwort verwenden. Vorlagen brauchen eine in HA zuordenbare MAC und eine erreichbare RPC-API.
+4. Namen, Bereich, Topic-Basis und Einschaltverhalten prüfen. Standardmäßig ergänzt die App das Topic um die physische MAC. Wer sein eigenes Schema exakt beibehalten will, kann den Haken entfernen und ein freies, eindeutiges Topic vergeben. Das Formular prüft SSID, Broker, Benutzer und TLS gegen das lokal hinterlegte Zugangsprofil. Für ein anderes Netz oder andere Zugangsdaten das Profil ändern und die App neu starten.
+5. Der Assistent überprüft die stabile Firmware über die Internetverbindung des Plugs. Er schreibt danach MQTT und die freigegebenen Geräteeinstellungen. Er wartet auf einen verfügbaren MQTT-Schalter in HA und schließt bei Einrichtung über Werks-WLAN den Shelly-AP. Während des gesamten Tests erfolgt kein automatischer Ein-/Aus-Schaltbefehl.
+6. Im Abschlussdialog das vorhandene Label „Weihnachten“ auswählen oder ein anderes vorhandenes Label zuweisen. Alternativ den Referenzschalter auswählen und die Verwendungen in Automationen und Skripten prüfen. Für passende Ein-/Aus-Aktionen ergänzt der Assistent den neuen Schalter nach Bestätigung pro Konfiguration. Den Arbeitsstand vorher und nachher sichert er lokal. Die Rücknahme prüft, ob der gespeicherte Stand noch aktuell ist. Zeitgleiche Änderungen in weiteren HA-Editoren vermeiden.
+
+## Unterbrechungen und Grenzen
+
+- Nach einem Abbruch „Fortsetzen“ wählen. Falls der Plug schon dem Zielnetz beigetreten ist, seine DHCP-Adresse eingeben. Die App prüft die MAC vor dem Fortsetzen. War das WLAN-Passwort falsch, das lokale Profil korrigieren, neu starten und mit leerem IP-Feld wiederholen.
+- Die MAC-Prüfung schützt vor versehentlicher Verwechslung. Werks-AP und lokale HTTP-RPC bieten beim erstmaligen Einrichten keine kryptografische Geräteauthentifizierung. Nur eigene, physisch zuordenbare Geräte in vertrauenswürdiger Funkumgebung provisionieren.
+- Discovery verwendet den Originalgenerator des Gerätewechsel-Tools 0.3.20. Er erzeugt modellabhängig Schalter, Messwerte und Diagnoseentitäten. Modell und Gerätekonfiguration müssen vom mitgelieferten Gen2+-Generator unterstützt werden. Ein lokaler Statusabruf alle zwei Minuten aktualisiert die Diagnose. Die zugehörigen Lizenzen und Quellrevisionen stehen unter device_migrator/vendor. Keine Migration eines bereits registrierten Plugs. Ein als Vorlage verwendeter Plug bleibt separat steuerbar.
+- Automationsbearbeitung betrifft über die HA-Editor-API erreichbare Einträge, explizite Schalterziele und die Aktionen switch.turn_on/off bzw. homeassistant.turn_on/off. Nicht lesbare Konfigurationen werden aufgelistet. Templates, Blueprints, Geräteauslöser, Packages und indirekte Gruppen-/Skriptaufrufe brauchen manuelle Prüfung. HA bietet für die verwendete Schreib-API keine atomare Versionsprüfung zwischen Vorschau und Speichern.
+- Die App verwendet den Supervisor für WLAN und HA-Administrator-APIs für Geräte-, Entitäts- und Labelregistrierung sowie Änderungen in den HA-Editoren. Webzugriff läuft über Ingress. Lokale Vorgänge und Sicherungen liegen in /data. HA-Backups mit App-Daten vertraulich behandeln.
+- Die App braucht keine UniFi-Anmeldung. Firmware-Download, DNS, Zeitabgleich und MQTT müssen im IoT-VLAN funktionieren. HA muss das Gerät auf TCP 80 erreichen können. Für die regelmäßige Diagnose empfiehlt sich eine DHCP-Reservierung im Zielnetz. Die HA-Brokerkennung braucht für den Diagnoseabgleich auch Publish-Rechte auf status/rpc, status/sys und online unter dem Plug-Topic.
+
+## Prüfung
+
+Lokal mit Python 3.12, aiohttp und `python -m unittest discover -s tests -v` prüfen. Die Tests simulieren Supervisor, Shelly-RPC und HA. Für die Hardwareabnahme zunächst einen einzelnen Plug mit identifizierbarer MAC verwenden. Danach denselben Ablauf mit einem zweiten Plug derselben Vorlage durchführen und beide Schalter getrennt prüfen.
+
+## Schnittstellen
+
+[Supervisor-Netzwerk](https://contributors.home-assistant.io/apps/supervisor-api/host/) · [HA-App-Kommunikation](https://contributors.home-assistant.io/apps/guides/communication/) · [Shelly RPC](https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Shelly/) · [Shelly MQTT](https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Mqtt/) · [HA MQTT](https://www.home-assistant.io/integrations/mqtt/)
