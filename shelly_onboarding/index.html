@@ -8,7 +8,7 @@
 <label>Vorlage<select id="src"></select></label><div id="templateBox" hidden><label>IP der Vorlage<input id="srcIp"></label><button type="button" id="load">Gerätekonfiguration lesen</button></div>
 <div class="grid"><label>Neuer Gerätename<input name="name" required></label><label>Bereich<select name="area"></select></label></div>
 <label>MQTT-Topic-Basis<input name="base" required placeholder="shellies/EG/Kueche/Weihnachtsstern"></label>
-<div class="grid"><label>Ziel-SSID<input name="ssid" required></label><label>MQTT-Broker<input name="broker" required placeholder="mqtt.example:8883"></label><label>MQTT-Benutzer<input name="user"></label><label>TLS<select name="tls"><option>user_ca.pem</option><option>ca.pem</option><option>off</option></select></label><label>Nach Stromausfall<select name="initial_state"><option value="off">Aus</option><option value="on">Ein</option><option value="restore_last">Letzten Zustand herstellen</option></select></label></div>
+<div class="grid"><label>Ziel-SSID<input name="ssid" required></label><label>MQTT-Broker<input name="broker" required placeholder="mqtt.example:8883" aria-describedby="brokerPorts"><small id="brokerPorts">Standardports für MQTT: 1883 ohne Verschlüsselung, 8883 mit Verschlüsselung (TLS).</small></label><label>MQTT-Benutzer<input name="user"></label><label>TLS<select name="tls"><option>user_ca.pem</option><option>ca.pem</option><option>off</option></select></label><label>Nach Stromausfall<select name="initial_state"><option value="off">Aus</option><option value="on">Ein</option><option value="restore_last">Letzten Zustand herstellen</option></select></label></div>
 <label><span><input type="checkbox" id="suffix" checked> MAC für ein eindeutiges Topic anhängen</span></label><small id="origin"></small><p id="preview"></p><button class="primary">Einstellungen bestätigen und einrichten</button></form></section>
 <section><h2>Einrichtungen</h2><div id="jobs"></div></section>
 <section id="finish" hidden><h2 id="finishTitle"></h2><label>Label für den neuen Schalter<select id="labels"></select></label><button id="addLabel">Label zuweisen</button><label>Bestehenden Schalter als Vorbild auswählen<select id="old"></select></label><button id="inspect">Automationen und Skripte prüfen</button><div id="effects"></div></section><div id="undos"></div></main>
@@ -38,9 +38,54 @@ form.onsubmit=guard(async()=>{if(source()&&sourceRead!==source().id)throw Error(
 async function finish(j){inv=await api('inventory');selected=j.mac;$('finish').hidden=false;$('finishTitle').textContent=j.plan.name+' in Automationen aufnehmen';options($('labels'), inv.labels.map(l=>[l.label_id,l.name]));const christmas=inv.labels.find(l=>l.name.toLowerCase()==='weihnachten');if(christmas)$('labels').value=christmas.label_id;
 options($('old'),inv.sources.flatMap(s=>s.switches.filter(e=>e!==j.entity).map(e=>[e,s.name+' · '+e])));$('effects').replaceChildren();$('finish').scrollIntoView()}
 $('addLabel').onclick=guard(async()=>{if(!$('labels').value)throw Error('Zuerst ein Label in HA anlegen.');await api('label',{mac:selected,label:$('labels').value});$('effects').textContent='Label zugewiesen.'});
-async function inspect(){const old=$('old').value;if(!old)throw Error('Referenzschalter auswählen.');const out=await api('effects',{mac:selected,old});const box=$('effects');box.replaceChildren(element('p',out.refs.length+' Treffer. '+out.skipped.length+' Konfigurationen konnten nicht gelesen werden.'));
-for(const ref of out.refs){const row=element('article',ref.name);row.append(element('p',ref.changes.length?'Ergänze '+state.jobs[selected].entity+' neben '+old+' in '+ref.changes.join(', '):'Bezug manuell prüfen.'));if(ref.changes.length)row.append(button('Diese Änderung übernehmen',async()=>{await api('effects',{mac:selected,old,apply:ref.path,digest:ref.digest});await inspect();await refresh()}));box.append(row)}
-if(out.skipped.length){const d=element('details','');d.append(element('summary','Übersprungene Einträge'),element('p',out.skipped.join(', ')));box.append(d)}}
+async function inspect(){
+    const mac=selected, old=$('old').value;
+    if(!old)throw Error('Referenzschalter auswählen.');
+    const out=await api('effects',{mac,old});
+    if(selected!==mac||$('old').value!==old)return;
+    const box=$('effects');
+    box.replaceChildren(element('p',out.refs.length+' Treffer. '+out.skipped.length+' Konfigurationen konnten nicht gelesen werden.'));
+    const applicable=out.refs.filter(ref=>ref.changes.length);
+    const apply=async refs=>{
+        const controls=[...box.querySelectorAll('button'),$('inspect'),$('old')];
+        controls.forEach(control=>control.disabled=true);
+        try{
+            const apply_all=Object.fromEntries(refs.map(ref=>[ref.path,ref.digest]));
+            const result=await api('effects',{mac,old,apply_all});
+            await refresh();
+            if(selected===mac&&$('old').value===old){
+                await inspect();
+                box.prepend(element('p',result.saved.length+' von '+refs.length+' Änderungen übernommen.'));
+                for(const failure of result.failed){
+                    box.prepend(element('p',failure.name+': '+failure.error));
+                }
+            }
+        }finally{
+            controls.forEach(control=>control.disabled=false);
+        }
+    };
+    if(applicable.length){
+        const all=button('Alle '+applicable.length+' Änderungen übernehmen',()=>apply(applicable));
+        all.className='primary';
+        box.append(all);
+    }
+    for(const ref of out.refs){
+        const row=element('article',ref.name);
+        if(ref.changes.length){
+            row.append(element('p','Ergänze '+state.jobs[mac].entity+' neben '+old+' in '+ref.changes.join(', ')));
+            row.append(button('Diese Änderung übernehmen',()=>apply([ref])));
+        }else{
+            row.append(element('p','Bezug manuell prüfen.'));
+        }
+        box.append(row);
+    }
+    if(out.skipped.length){
+        const details=element('details','');
+        details.append(element('summary','Übersprungene Einträge'),element('p',out.skipped.join(', ')));
+        box.append(details);
+    }
+}
+$('old').onchange=()=>$('effects').replaceChildren();
 $('inspect').onclick=guard(inspect);$('manual').onclick=guard(()=>openForm('',false));$('scan').onclick=guard(async()=>{await api('scan');await refresh()});
 async function refresh(){if(loading)return;loading=true;try{state=await api('state');$('notice').textContent=state.notice;$('aps').replaceChildren();for(const ssid of state.aps){const row=element('article','');row.append(element('strong',ssid),element('br',''),button('Neu einrichten',()=>openForm(ssid,false)),button('Nach Vorlage',()=>openForm(ssid,true)),button('Ignorieren',async()=>{await api('ignore',{ap:ssid});await refresh()}));$('aps').append(row)}if(!state.aps.length)$('aps').textContent='Aktuell kein neuer Shelly in Funkreichweite.';
 $('ignored').replaceChildren(...state.ignored.map(ap=>button(ap+' wieder anzeigen',async()=>{await api('ignore',{ap});await refresh()})));

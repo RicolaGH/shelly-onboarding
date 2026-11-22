@@ -108,6 +108,77 @@ class Workflow(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("lease",self.app.db)
         self.assertTrue(all(args.args[1]=="Shelly.GetDeviceInfo" for args in self.app.rpc.await_args_list))
 
+    async def test_installs_all_stable_firmware_before_mqtt(self):
+        self.job.update(step="Firmware", ip="192.168.1.12")
+        versions = iter(["1.6", "1.7", None])
+        installed = INFO["ver"]
+        target = None
+        methods = []
+
+        async def rpc(ip, method, params=None):
+            nonlocal installed, target
+            methods.append(method)
+            if method == "Shelly.GetDeviceInfo":
+                return {**INFO, "ver": installed}
+            if method == "Shelly.GetConfig":
+                return CONFIG
+            if method == "Shelly.CheckForUpdate":
+                target = next(versions)
+                return {"stable": {"version": target}} if target else {"beta": {"version": "2.0"}}
+            if method == "Shelly.Update":
+                installed = target
+            if method == "MQTT.GetStatus":
+                return {"connected": True}
+            return {}
+
+        self.app.rpc = AsyncMock(side_effect=rpc)
+        self.app.call = AsyncMock(return_value={"state": "off"})
+        with patch("app.asyncio.sleep", new=AsyncMock()):
+            await self.app.run(self.job)
+
+        self.assertEqual(self.job["step"], "Fertig", self.job["error"])
+        self.assertEqual(installed, "1.7")
+        before_mqtt = methods[:methods.index("MQTT.SetConfig")]
+        self.assertEqual(before_mqtt.count("Shelly.CheckForUpdate"), 3)
+        self.assertEqual(before_mqtt.count("Shelly.Update"), 2)
+
+    async def test_bulk_effects_preflight_and_individual_undo(self):
+        old, new = "switch.reference", "switch.stern"
+        self.job.update(step="Fertig", entity=new)
+        self.app.inventory = AsyncMock(return_value={"sources": [{"id": "reference", "switches": [old]}]})
+        automation = "core/api/config/automation/config/123"
+        script = "core/api/config/script/config/light_off"
+        configs = {
+            automation: {"actions": [{"action": "switch.turn_on", "target": {"entity_id": old}}]},
+            script: {"sequence": [{"action": "switch.turn_off", "target": {"entity_id": old}}]},
+        }
+        original = configs.copy()
+
+        async def call(path, body=None):
+            if path == "core/api/states":
+                return [
+                    {"entity_id": "automation.light_on", "attributes": {"id": "123"}},
+                    {"entity_id": "script.light_off", "attributes": {}},
+                ]
+            if body is not None:
+                configs[path] = body
+            return configs[path]
+
+        self.app.call = AsyncMock(side_effect=call)
+        request = {"mac": MAC, "old": old}
+        preview = await self.app.action("effects", request)
+        apply_all = {ref["path"]: ref["digest"] for ref in preview["refs"]}
+        with self.assertRaisesRegex(ValueError, "Vorschau veraltet"):
+            await self.app.action("effects", {**request, "apply_all": {**apply_all, script: "stale"}})
+        self.assertEqual(configs, original)
+
+        result = await self.app.action("effects", {**request, "apply_all": apply_all})
+        self.assertEqual(result, {"saved": ["automation.light_on", "script.light_off"], "failed": []})
+        self.assertTrue(all(new in str(config) for config in configs.values()))
+        await self.app.action("undo", {"key": MAC + ":script.light_off"})
+        self.assertEqual(configs[script], original[script])
+        self.assertIn(new, str(configs[automation]))
+
     async def test_discovery_retry(self):
         self.job.update(step="Discovery",ip="192.168.1.12")
         self.app.rpc=AsyncMock(side_effect=lambda ip,method,*args: CONFIG if method=="Shelly.GetConfig" else INFO)

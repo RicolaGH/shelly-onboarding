@@ -228,8 +228,14 @@ class Assistant:
             if job["step"] == "Firmware":
                 if "switch:0" not in await self.rpc(ip,"Shelly.GetConfig"):
                     raise ValueError("Dieser Plug besitzt keinen schaltbaren Ausgang.")
-                update = (await self.rpc(ip,"Shelly.CheckForUpdate")).get("stable")
-                if update:
+                attempted_versions = set()
+                while update := (await self.rpc(ip,"Shelly.CheckForUpdate")).get("stable"):
+                    version = update.get("version")
+                    if not version:
+                        raise ValueError("Shelly meldet ein Firmwareupdate ohne Versionsnummer.")
+                    if version == info.get("ver") or version in attempted_versions:
+                        raise ValueError(f"Shelly meldet Firmware {version} erneut. Bitte später fortsetzen.")
+                    attempted_versions.add(version)
                     await self.rpc(ip,"Shelly.Update",{"stage":"stable"})
                     for _ in range(55):
                         await asyncio.sleep(3)
@@ -237,7 +243,7 @@ class Assistant:
                             info = await self.identify(ip,job["mac"])
                         except (ValueError,TimeoutError,aiohttp.ClientError):
                             continue
-                        if info.get("ver")==update.get("version"):
+                        if info.get("ver") == version:
                             break
                     else:
                         raise ValueError("Firmwareversion noch nicht bestätigt.")
@@ -324,7 +330,13 @@ class Assistant:
         source = next((s for s in inventory["sources"] if old in s["switches"]),None)
         if not source or old == job["entity"]:
             raise ValueError("Anderen Referenzschalter auswählen.")
+        requested = data.get("apply_all")
+        if requested is None:
+            requested = {data["apply"]: data.get("digest")} if data.get("apply") else {}
+        if not isinstance(requested, dict):
+            raise ValueError("Ungültige Auswahl zur Übernahme.")
         refs, skipped = [], []
+        pending = {}
         for state in await self.call("core/api/states"):
             domain, key = state["entity_id"].split(".",1)
             if domain not in ("automation","script"):
@@ -347,18 +359,29 @@ class Assistant:
             updated, changes = extend(cfg, old, job["entity"])
             digest = hashlib.sha256(raw.encode()).hexdigest()
             refs.append(dict(path=path,name=state["entity_id"],changes=changes,digest=digest))
-            if data.get("apply")==path:
-                if data.get("digest") != digest or not changes:
+            if path in requested:
+                if requested[path] != digest or not changes:
                     raise ValueError("Vorschau veraltet. Bitte erneut prüfen.")
-                backup = {"path":path,"before":cfg,"after":updated}
-                backup_id = job["mac"]+":"+state["entity_id"]
-                self.db["backups"][backup_id] = backup
+                pending[path] = (state["entity_id"], cfg, updated)
+        if not requested:
+            return dict(refs=refs,skipped=skipped)
+        if pending.keys() != requested.keys():
+            raise ValueError("Eine Änderung ist nicht mehr verfügbar. Bitte erneut prüfen.")
+
+        saved, failed = [], []
+        for path, (entity, before, after) in pending.items():
+            try:
+                if await self.call(path) != before:
+                    raise ValueError("Konfiguration wurde seit der Vorschau geändert.")
+                backup_id = job["mac"] + ":" + entity
+                self.db["backups"][backup_id] = {"path": path, "before": before, "after": after}
                 self.save()
-                await self.call(path,updated)
-                return {"saved":state["entity_id"]}
-        if data.get("apply"):
-            raise ValueError("Änderung nicht mehr verfügbar.")
-        return dict(refs=refs,skipped=skipped)
+                await self.call(path, after)
+            except (ValueError, TimeoutError, aiohttp.ClientError) as error:
+                failed.append({"name": entity, "error": str(error) or type(error).__name__})
+            else:
+                saved.append(entity)
+        return dict(saved=saved, failed=failed)
 
     async def action(self, action, d):
         jobs = self.db["jobs"]
