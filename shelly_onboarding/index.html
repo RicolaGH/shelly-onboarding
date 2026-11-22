@@ -1,6 +1,57 @@
 <!doctype html><html lang="de"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shelly Onboarding</title>
-<style>[hidden]{display:none!important}
-:root{color-scheme:light dark;font:16px/1.5 system-ui,sans-serif;--line:#8999a250;--accent:#007277}body{margin:0;background:Canvas;color:CanvasText}main{max-width:48rem;margin:auto;padding:1.4rem}h1{font-size:2rem;letter-spacing:-.04em}h2{font-size:1.22rem}section,details{border-top:1px solid var(--line);padding:.7rem 0 1rem}input,select,button{font:inherit;border-radius:.5rem;padding:.55rem;border:1px solid var(--line);box-sizing:border-box}label{display:grid;gap:.25rem;margin:.6rem 0}button{margin:.25rem .4rem .25rem 0;cursor:pointer}button.primary{background:var(--accent);color:white}button:disabled{opacity:.5}small{opacity:.8}#msg{color:#b24d19;white-space:pre-wrap}article{border-left:3px solid var(--accent);padding:.5rem .9rem;margin:.8rem 0}summary{cursor:pointer}fieldset{border:0;margin:0;padding:0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(14rem,1fr));gap:.2rem 1rem}p{overflow-wrap:anywhere}
+<style>
+[hidden]{display:none!important}
+:root{
+    color-scheme:light dark;
+    font:15px/1.5 system-ui,sans-serif;
+    --bg:#f4f6f7;--surface:#fff;--text:#19282c;--muted:#52666b;
+    --line:#dce4e6;--accent:#006c70;--soft:#e9f4f3;--warning:#93470b;
+}
+@media(prefers-color-scheme:dark){
+    :root{--bg:#151c1e;--surface:#1d282b;--text:#eef4f3;--muted:#b2c3c5;
+          --line:#38484c;--accent:#80d5cc;--soft:#253e3d;--warning:#ffbe80}
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text)}
+main{max-width:58rem;margin:auto;padding:clamp(.75rem,3vw,2rem)}
+h1{font-size:clamp(1.6rem,5vw,2rem);letter-spacing:-.035em;margin:0 0 1.2rem}
+h2{font-size:1.15rem;margin:0 0 .75rem}
+p{margin:.35rem 0 .65rem;overflow-wrap:anywhere}
+section{background:var(--surface);border:1px solid var(--line);border-radius:1rem;padding:1rem;margin-bottom:1rem;min-width:0}
+input,select,button{font:inherit;color:inherit;background:var(--surface);border:1px solid var(--line);border-radius:.55rem;padding:.48rem .7rem;min-width:0;max-width:100%}
+button{margin:.2rem .35rem .2rem 0;cursor:pointer;min-height:2.4rem}
+button:hover:not(:disabled){background:var(--soft)}
+button.primary{background:#006c70;border-color:#006c70;color:#fff}
+button.primary:hover:not(:disabled){background:#00565a}
+button:disabled{opacity:.5;cursor:wait}
+button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+label{display:grid;gap:.25rem;margin:.5rem 0}
+small,.muted,.job-meta{color:var(--muted)}
+#msg{color:var(--warning);white-space:pre-wrap}
+#msg:empty,#active:empty{display:none}
+.warning{color:var(--warning)}
+article{border-bottom:1px solid var(--line);padding:.65rem 0;overflow-wrap:anywhere}
+article:last-child{border-bottom:0}
+summary{cursor:pointer;overflow-wrap:anywhere}
+details>ul{margin:.4rem 0;padding-inline-start:1.4rem;overflow-wrap:anywhere}
+fieldset{border:0;margin:0;padding:0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,14rem),1fr));gap:.25rem 1rem;align-items:start}
+.history-tools,.finish-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem}
+.history-tools h2,.finish-header h2{margin:0}
+.history-tools input{width:min(100%,18rem)}
+.job-list{margin-top:.65rem}
+.job-row{border-bottom:1px solid var(--line)}
+.job-row:last-child{border-bottom:0}
+.job-row>summary{padding:.75rem .25rem}
+.job-row>summary:hover{background:var(--soft)}
+.job-row>summary strong{margin-inline-start:.3rem}
+.job-body{padding:0 .35rem .8rem 1.25rem}
+.job-body details,.effect-details{margin:.45rem 0}
+.job-meta{display:block;font-size:.88rem;overflow-wrap:anywhere}
+.undo-list{list-style:none;padding:0}
+.undo-list li{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.25rem .6rem}
+.undo-list button{flex:none}
+code{font-size:.86em;overflow-wrap:anywhere}
 </style><main><h1>Shelly Onboarding</h1><p id="msg" role="alert"></p>
 <section><h2>Neue Plugs</h2><div id="aps"></div><button id="scan">WLAN durchsuchen</button><button id="manual">Über Ziel-IP einrichten</button><div id="ignored"></div><small id="notice"></small></section>
 <section id="wizard" hidden><h2 id="heading"></h2><form id="form">
@@ -10,12 +61,14 @@
 <label>MQTT-Topic-Basis<input name="base" required placeholder="shellies/EG/Kueche/Weihnachtsstern"></label>
 <div class="grid"><label>Ziel-SSID<input name="ssid" required></label><label>MQTT-Broker<input name="broker" required placeholder="mqtt.example:8883" aria-describedby="brokerPorts"><small id="brokerPorts">Standardports für MQTT: 1883 ohne Verschlüsselung, 8883 mit Verschlüsselung (TLS).</small></label><label>MQTT-Benutzer<input name="user"></label><label>TLS<select name="tls"><option>user_ca.pem</option><option>ca.pem</option><option>off</option></select></label><label>Nach Stromausfall<select name="initial_state"><option value="off">Aus</option><option value="on">Ein</option><option value="restore_last">Letzten Zustand herstellen</option></select></label></div>
 <label><span><input type="checkbox" id="suffix" checked> MAC für ein eindeutiges Topic anhängen</span></label><small id="origin"></small><div id="templateSummary"></div><p id="preview"></p><button class="primary">Einstellungen bestätigen und einrichten</button></form></section>
-<section><h2>Einrichtungen</h2><div id="jobs"></div></section>
-<section id="finish" hidden><h2 id="finishTitle"></h2><label>Label für den neuen Schalter<select id="labels"></select></label><button id="addLabel">Label zuweisen</button><label>Bestehenden Schalter als Vorbild auswählen<select id="old"></select></label><button id="inspect">Automationen und Skripte prüfen</button><div id="effects"></div></section><div id="undos"></div></main>
+<section id="active" aria-label="Offene Einrichtungen"></section>
+<section id="finish" hidden><div class="finish-header"><h2 id="finishTitle"></h2><button id="closeFinish">Schließen</button></div><label>Label für den neuen Schalter<select id="labels"></select></label><button id="addLabel">Label zuweisen</button><label>Bestehenden Schalter als Vorbild auswählen<select id="old"></select></label><button id="inspect">Automationen und Skripte prüfen</button><div id="effects"></div></section><section id="history" hidden>
+<div class="history-tools"><h2 id="historyTitle">Abgeschlossene Einrichtungen</h2><input id="jobSearch" type="search" placeholder="Gerät suchen" aria-label="Abgeschlossene Einrichtungen durchsuchen"></div>
+<div id="jobs" class="job-list"></div><button id="showMore" hidden>Mehr anzeigen</button>
+</section></main>
 <script>
 const $=id=>document.getElementById(id), form=$('form'), fields=form.elements;
 let state, inv, ap='', selected='', sourceRead='', loading=false;
-const prompted=new Set();
 function element(tag,text){const n=document.createElement(tag); n.textContent=text;return n}
 function button(text,fn){const b=element('button',text);b.type='button';b.onclick=guard(fn);return b}
 function guard(fn){return async e=>{e?.preventDefault();$('msg').textContent='';try{await fn()}catch(err){$('msg').textContent=err.message;window.scrollTo(0,0)}}}
@@ -52,7 +105,8 @@ function showTemplateSettings(container, groups){
 $('suffix').onchange=preview;fields.base.oninput=fields.expected.oninput=preview;
 form.onsubmit=guard(async()=>{if(source()&&sourceRead!==source().id)throw Error('Vorlage zuerst lesen.');const data=Object.fromEntries(new FormData(form));data.ap=ap;data.expected=mac();data.topic=data.base+($('suffix').checked?'-'+mac():'');data.source=$('src').value;data.source_ip=$('srcIp').value;await api('start',data);sessionStorage.setItem('started',data.expected);$('wizard').hidden=true;await refresh()});
 async function finish(j){inv=await api('inventory');selected=j.mac;$('finish').hidden=false;$('finishTitle').textContent=j.plan.name+' in Automationen aufnehmen';options($('labels'), inv.labels.map(l=>[l.label_id,l.name]));const christmas=inv.labels.find(l=>l.name.toLowerCase()==='weihnachten');if(christmas)$('labels').value=christmas.label_id;
-options($('old'),inv.sources.flatMap(s=>s.switches.filter(e=>e!==j.entity).map(e=>[e,s.name+' · '+e])));$('effects').replaceChildren();$('finish').scrollIntoView()}
+options($('old'),inv.sources.flatMap(s=>s.switches.filter(e=>e!==j.entity).map(e=>[e,s.name+' · '+e])));$('effects').replaceChildren();$('finish').scrollIntoView({block:'start'})}
+$('closeFinish').onclick=()=>{$('finish').hidden=true;selected=''};
 $('addLabel').onclick=guard(async()=>{if(!$('labels').value)throw Error('Zuerst ein Label in HA anlegen.');await api('label',{mac:selected,label:$('labels').value});$('effects').textContent='Label zugewiesen.'});
 async function inspect(){
     const mac=selected, old=$('old').value;
@@ -60,7 +114,7 @@ async function inspect(){
     const out=await api('effects',{mac,old});
     if(selected!==mac||$('old').value!==old)return;
     const box=$('effects');
-    box.replaceChildren(element('p',out.refs.length+' Treffer. '+out.skipped.length+' Konfigurationen konnten nicht gelesen werden.'));
+    box.replaceChildren(element('p',out.refs.length+' Treffer für '+state.jobs[mac].plan.name+'.'));
     const applicable=out.refs.filter(ref=>ref.changes.length);
     const apply=async refs=>{
         const controls=[...box.querySelectorAll('button'),$('inspect'),$('old')];
@@ -88,7 +142,12 @@ async function inspect(){
     for(const ref of out.refs){
         const row=element('article',ref.name);
         if(ref.changes.length){
-            row.append(element('p','Ergänze '+state.jobs[mac].entity+' neben '+old+' in '+ref.changes.join(', ')));
+            const detail=element('details','');
+            detail.className='effect-details';
+            const count=ref.changes.length;
+            detail.append(element('summary',count+' '+(count===1?'Schaltaktion':'Schaltaktionen')),
+                element('p',ref.changes.join(', ')));
+            row.append(detail);
             row.append(button('Diese Änderung übernehmen',()=>apply([ref])));
         }else{
             row.append(element('p','Bezug manuell prüfen.'));
@@ -97,24 +156,131 @@ async function inspect(){
     }
     if(out.skipped.length){
         const details=element('details','');
-        details.append(element('summary','Übersprungene Einträge'),element('p',out.skipped.join(', ')));
+        details.append(element('summary','Übersprungene Einträge ('+out.skipped.length+')'),element('p',out.skipped.join(', ')));
         box.append(details);
     }
 }
 $('old').onchange=()=>$('effects').replaceChildren();
 $('inspect').onclick=guard(inspect);$('manual').onclick=guard(()=>openForm('',false));$('scan').onclick=guard(async()=>{await api('scan');await refresh()});
-async function refresh(){if(loading)return;loading=true;try{state=await api('state');$('notice').textContent=state.notice;$('aps').replaceChildren();for(const ssid of state.aps){const row=element('article','');row.append(element('strong',ssid),element('br',''),button('Neu einrichten',()=>openForm(ssid,false)),button('Nach Vorlage',()=>openForm(ssid,true)),button('Ignorieren',async()=>{await api('ignore',{ap:ssid});await refresh()}));$('aps').append(row)}if(!state.aps.length)$('aps').textContent='Aktuell kein neuer Shelly in Funkreichweite.';
-$('ignored').replaceChildren(...state.ignored.map(ap=>button(ap+' wieder anzeigen',async()=>{await api('ignore',{ap});await refresh()})));
-$('jobs').replaceChildren();for(const j of Object.values(state.jobs).reverse()){if(j.step==='Fertig'&&!prompted.has(j.mac)){prompted.add(j.mac);if(sessionStorage.getItem('started')===j.mac){sessionStorage.removeItem('started');await finish(j)}}const row=element('article','');row.append(element('strong',j.plan.name),element('p',[j.step,j.ip,j.entity,j.error].filter(Boolean).join(' · ')));if(j.template_skipped){
-    const details=element('div','');
-    showTemplateSettings(details,[
-        ['Am Ziel bestätigt',j.template_confirmed],
-        ['Bitte prüfen',j.template_warnings],
-        ['Aus der Vorlage ausgelassen',j.template_skipped]
-    ]);
-    row.append(details);
+const HISTORY_PAGE_SIZE=8;
+let visibleJobs=HISTORY_PAGE_SIZE, renderedJobs='';
+const expandedJobs=new Set();
+$('jobSearch').oninput=()=>{visibleJobs=HISTORY_PAGE_SIZE;renderHistory()};
+$('showMore').onclick=()=>{visibleJobs+=HISTORY_PAGE_SIZE;renderHistory()};
+
+function renderHistory(){
+    const finished=Object.values(state.jobs).reverse().filter(job=>job.step==='Fertig');
+    const query=$('jobSearch').value.trim().toLowerCase();
+    const matches=finished.filter(job=>[job.plan.name,job.ip,job.entity].some(value=>value?.toLowerCase().includes(query)));
+    const signature=JSON.stringify([finished.length,matches.slice(0,visibleJobs),matches.length,state.backups,query]);
+    if(signature===renderedJobs)return;
+    renderedJobs=signature;
+    $('history').hidden=!finished.length;
+    $('historyTitle').textContent='Abgeschlossene Einrichtungen ('+finished.length+')';
+    const rows=[];
+    const backupsByDevice=new Map();
+    for(const key of state.backups){
+        const [mac,entity]=key.split(':');
+        if(!backupsByDevice.has(mac))backupsByDevice.set(mac,[]);
+        backupsByDevice.get(mac).push([key,entity]);
+    }
+    for(const job of matches.slice(0,visibleJobs)){
+        const row=element('details','');
+        row.className='job-row';
+        row.open=expandedJobs.has(job.mac);
+        row.ontoggle=()=>row.open?expandedJobs.add(job.mac):expandedJobs.delete(job.mac);
+        const summary=element('summary','');
+        summary.append(element('strong',job.plan.name));
+        if(job.template_warnings?.length){
+            const warning=element('small',' · '+job.template_warnings.length+' Hinweise');
+            warning.className='warning';
+            summary.append(warning);
+        }
+        const body=element('div','');
+        body.className='job-body';
+        const meta=element('span',[job.ip,job.entity].filter(Boolean).join(' · '));
+        meta.className='job-meta';
+        const report=element('div','');
+        showTemplateSettings(report,[
+            ['Am Ziel bestätigt',job.template_confirmed],
+            ['Bitte prüfen',job.template_warnings],
+            ['Aus der Vorlage ausgelassen',job.template_skipped]
+        ]);
+        body.append(meta,report,button('Label und Automationen …',()=>finish(job)));
+        const backups=backupsByDevice.get(job.mac);
+        if(backups?.length){
+            const undo=element('details',''), list=element('ul','');
+            list.className='undo-list';
+            for(const [key,entity] of backups.reverse()){
+                const item=element('li','');
+                item.append(element('code',entity),button('Zurücknehmen',async()=>{
+                    if(!confirm('Änderung an '+entity+' für '+job.plan.name+' zurücknehmen?'))return;
+                    await api('undo',{key});await refresh();
+                }));
+                list.append(item);
+            }
+            undo.append(element('summary','Änderungen zurücknehmen ('+backups.length+')'),list);
+            body.append(undo);
+        }
+        row.append(summary,body);
+        rows.push(row);
+    }
+    if(!rows.length&&finished.length)rows.push(element('p','Keine passenden Geräte gefunden.'));
+    $('jobs').replaceChildren(...rows);
+    const remaining=matches.length-visibleJobs;
+    $('showMore').hidden=remaining<=0;
+    $('showMore').textContent='Mehr anzeigen ('+Math.max(0,remaining)+')';
 }
-if(j.step==='Fertig')row.append(button('Label und Automationen …',()=>finish(j)));else if(!state.busy)row.append(button('Fortsetzen',async()=>{const ip=prompt('Optional neue Ziel-IP eingeben. Leer = gespeicherten Schritt wiederholen.',j.ip||'');if(ip!==null){await api('resume',{mac:j.mac,ip});await refresh()}}),button('Vorgang verwerfen',async()=>{if(confirm('Lokalen Vorgang verwerfen? Bereits geschriebene Geräteeinstellungen bleiben aktiv.')){await api('discard',{mac:j.mac});await refresh()}}));$('jobs').append(row)}
-$('undos').replaceChildren(...state.backups.map(key=>button('Änderung zurücknehmen · '+key.split(':').pop(),async()=>{await api('undo',{key});await refresh()})))}finally{loading=false}}
-guard(refresh)();setInterval(guard(refresh),5000);
+
+function renderActive(){
+    const active=Object.values(state.jobs).reverse().filter(job=>job.step!=='Fertig');
+    const container=$('active');
+    container.replaceChildren();
+    if(!active.length)return;
+    container.append(element('h2','Offene Einrichtungen'));
+    for(const job of active){
+        const row=element('article','');
+        row.append(element('strong',job.plan.name),element('p',[job.step,job.ip,job.progress].filter(Boolean).join(' · ')));
+        if(job.error){
+            const error=element('p',job.error);
+            error.className='warning';
+            row.append(error);
+        }
+        if(!state.busy)row.append(button('Fortsetzen',async()=>{
+            const ip=prompt('Optional neue Ziel-IP eingeben. Leer = gespeicherten Schritt wiederholen.',job.ip||'');
+            if(ip!==null){await api('resume',{mac:job.mac,ip});await refresh()}
+        }),button('Vorgang verwerfen',async()=>{
+            if(confirm('Lokalen Vorgang verwerfen? Bereits geschriebene Geräteeinstellungen bleiben aktiv.')){
+                await api('discard',{mac:job.mac});await refresh();
+            }
+        }));
+        container.append(row);
+    }
+}
+
+async function refresh(){
+    if(loading)return;
+    loading=true;
+    try{
+        state=await api('state');
+        $('notice').textContent=state.notice;
+        $('aps').replaceChildren();
+        for(const ssid of state.aps){
+            const row=element('article','');
+            row.append(element('strong',ssid),element('br',''),button('Neu einrichten',()=>openForm(ssid,false)),
+                button('Nach Vorlage',()=>openForm(ssid,true)),button('Ignorieren',async()=>{await api('ignore',{ap:ssid});await refresh()}));
+            $('aps').append(row);
+        }
+        if(!state.aps.length)$('aps').textContent='Aktuell kein neuer Shelly in Funkreichweite.';
+        $('ignored').replaceChildren(...state.ignored.map(ap=>button(ap+' wieder anzeigen',async()=>{await api('ignore',{ap});await refresh()})));
+        renderActive();
+        renderHistory();
+        const completed=state.jobs[sessionStorage.getItem('started')];
+        if(completed?.step==='Fertig'){
+            await finish(completed);
+            sessionStorage.removeItem('started');
+        }
+    }finally{loading=false}
+}
+guard(refresh)();setInterval(()=>refresh().catch(error=>{$('msg').textContent=error.message}),5000);
 </script></html>

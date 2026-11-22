@@ -18,6 +18,12 @@ AP = "192.168.33.1"
 FACTORY = re.compile(r"shelly[\w-]*-([a-f0-9]{12})", re.I)
 
 
+class ShellyRPCError(ValueError):
+    def __init__(self, method, code):
+        super().__init__(f"{method}: Gerät meldet Fehler {code}")
+        self.code = code
+
+
 class Assistant:
     def __init__(self, directory=ROOT):
         self.directory = directory
@@ -69,12 +75,38 @@ class Assistant:
             middlewares = (aiohttp.DigestAuthMiddleware("admin", self.options["shelly_admin_password"]),)
         async with self.http.post(f"http://{ip}/rpc", json=payload, middlewares=middlewares,
                                   allow_redirects=False, timeout=aiohttp.ClientTimeout(total=7)) as r:
+            try:
+                data = await r.json(content_type=None)
+            except ValueError:
+                if r.status == 200:
+                    raise
+                data = {}
+            if isinstance(data, dict) and isinstance(data.get("error"), dict):
+                raise ShellyRPCError(method, data["error"].get("code"))
             if r.status != 200:
                 raise ValueError(f"{method}: HTTP {r.status}")
-            data = await r.json(content_type=None)
-            if "result" not in data:
-                raise ValueError(f"{method}: Gerät meldet Fehler {data.get('error', {}).get('code')}")
+            if not isinstance(data, dict) or "result" not in data:
+                raise ValueError(f"{method}: Ungültige Antwort vom Gerät.")
             return data["result"]
+
+    async def firmware_rpc(self, job, method, params=None):
+        ip = job["ip"]
+        for attempt in range(13):
+            try:
+                if attempt:
+                    await self.identify(ip, job["mac"])
+                return await self.rpc(ip, method, params)
+            except ShellyRPCError as error:
+                if str(error.code) not in ("-109", "109"):
+                    raise
+            except (TimeoutError, aiohttp.ClientConnectionError):
+                if not attempt:
+                    raise
+            if attempt == 0:
+                job["progress"] = "Warte auf Firmware-Bereitschaft (109) …"
+            if attempt < 12:
+                await asyncio.sleep(5)
+        raise ValueError(f"{method}: Gerät nach Fehler 109 noch nicht bereit. Bitte später fortsetzen.")
 
     async def service(self, domain, service, body):
         return await self.call(f"core/api/services/{domain}/{service}", body)
@@ -278,14 +310,15 @@ class Assistant:
                 if "switch:0" not in await self.rpc(ip,"Shelly.GetConfig"):
                     raise ValueError("Dieser Plug besitzt keinen schaltbaren Ausgang.")
                 attempted_versions = set()
-                while update := (await self.rpc(ip,"Shelly.CheckForUpdate")).get("stable"):
+                while update := (await self.firmware_rpc(job, "Shelly.CheckForUpdate")).get("stable"):
                     version = update.get("version")
                     if not version:
                         raise ValueError("Shelly meldet ein Firmwareupdate ohne Versionsnummer.")
                     if version == info.get("ver") or version in attempted_versions:
                         raise ValueError(f"Shelly meldet Firmware {version} erneut. Bitte später fortsetzen.")
                     attempted_versions.add(version)
-                    await self.rpc(ip,"Shelly.Update",{"stage":"stable"})
+                    await self.firmware_rpc(job, "Shelly.Update", {"stage":"stable"})
+                    job["progress"] = f"Installiere Firmware {version} und warte auf den Neustart …"
                     await asyncio.sleep(30)
                     for attempt in range(55):
                         if attempt:
@@ -295,9 +328,11 @@ class Assistant:
                         except (ValueError,TimeoutError,aiohttp.ClientError):
                             continue
                         if info.get("ver") == version:
+                            job["progress"] = "Prüfe auf weitere Firmware-Updates …"
                             break
                     else:
                         raise ValueError("Firmwareversion noch nicht bestätigt.")
+                job.pop("progress", None)
                 self.phase(job,"MQTT")
             if job["step"] == "MQTT":
                 restart, expected, warnings = False, [], []
@@ -356,6 +391,7 @@ class Assistant:
                 else:
                     raise ValueError("MQTT-Schalter in HA noch nicht verfügbar. Discovery-Präfix und ACL prüfen.")
         except Exception as e:
+            job.pop("progress", None)
             job["error"] = str(e) or type(e).__name__
             self.save()
 

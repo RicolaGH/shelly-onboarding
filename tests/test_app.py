@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"shelly_onboarding"))
-from app import Assistant, AP
+from app import Assistant, AP, ShellyRPCError
 from logic import discovery, extend, plug, radio, local_ip, plan_fields
 
 MAC = "aabbccddeeff"
@@ -114,21 +114,29 @@ class Workflow(unittest.IsolatedAsyncioTestCase):
         installed = INFO["ver"]
         target = None
         methods = []
+        retry_check = True
+        retry_update = True
 
         async def sleep(seconds):
             methods.append(f"sleep:{seconds}")
 
         async def rpc(ip, method, params=None):
-            nonlocal installed, target
+            nonlocal installed, target, retry_check, retry_update
             methods.append(method)
             if method == "Shelly.GetDeviceInfo":
                 return {**INFO, "ver": installed}
             if method == "Shelly.GetConfig":
                 return CONFIG
             if method == "Shelly.CheckForUpdate":
+                if installed == "1.6" and retry_check:
+                    retry_check = False
+                    raise ShellyRPCError(method, -109)
                 target = next(versions)
                 return {"stable": {"version": target}} if target else {"beta": {"version": "2.0"}}
             if method == "Shelly.Update":
+                if target == "1.7" and retry_update:
+                    retry_update = False
+                    raise ShellyRPCError(method, 109)
                 installed = target
             if method == "MQTT.GetStatus":
                 return {"connected": True}
@@ -142,11 +150,28 @@ class Workflow(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.job["step"], "Fertig", self.job["error"])
         self.assertEqual(installed, "1.7")
         before_mqtt = methods[:methods.index("MQTT.SetConfig")]
-        self.assertEqual(before_mqtt.count("Shelly.CheckForUpdate"), 3)
-        self.assertEqual(before_mqtt.count("Shelly.Update"), 2)
-        for index, method in enumerate(before_mqtt):
-            if method == "Shelly.Update":
-                self.assertEqual(before_mqtt[index + 1:index + 3], ["sleep:30", "Shelly.GetDeviceInfo"])
+        self.assertEqual(before_mqtt.count("Shelly.CheckForUpdate"), 4)
+        self.assertEqual(before_mqtt.count("Shelly.Update"), 3)
+        self.assertEqual(before_mqtt.count("sleep:5"), 2)
+        settled = [index for index, event in enumerate(before_mqtt) if event == "sleep:30"]
+        self.assertEqual(len(settled), 2)
+        for index in settled:
+            self.assertEqual(before_mqtt[index-1:index+2], ["Shelly.Update", "sleep:30", "Shelly.GetDeviceInfo"])
+
+    async def test_firmware_retry_is_bounded_and_keeps_other_errors(self):
+        self.job.update(ip="192.168.1.12", step="Firmware")
+        method = "Shelly.CheckForUpdate"
+        self.app.identify = AsyncMock(return_value=INFO)
+        self.app.rpc = AsyncMock(side_effect=ShellyRPCError(method, -109))
+        with patch("app.asyncio.sleep", new=AsyncMock()) as sleep:
+            with self.assertRaisesRegex(ValueError, "Fehler 109"):
+                await self.app.firmware_rpc(self.job, method)
+            self.assertEqual(sleep.await_count, 12)
+        self.app.rpc.reset_mock(side_effect=True)
+        self.app.rpc.side_effect = ShellyRPCError(method, -103)
+        with self.assertRaisesRegex(ShellyRPCError, "-103"):
+            await self.app.firmware_rpc(self.job, method)
+        self.assertEqual(self.app.rpc.await_count, 1)
 
     async def test_bulk_effects_preflight_and_individual_undo(self):
         old, new = "switch.reference", "switch.stern"
