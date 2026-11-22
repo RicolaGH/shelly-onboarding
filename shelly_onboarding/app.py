@@ -11,6 +11,7 @@ from urllib.parse import quote, urlsplit
 import aiohttp
 from aiohttp import web
 from logic import discovery, extend, local_ip, plan_fields, plug, radio
+from logic import PLUG_UI, SWITCH_PROTECTION, compatible_settings, setting_values, template_settings
 
 ROOT = Path("/data")
 AP = "192.168.33.1"
@@ -165,10 +166,58 @@ class Assistant:
         if mac not in src["macs"]:
             raise ValueError("Die Geräteidentität passt nicht zur gewählten HA-Vorlage.")
         config = await self.rpc(ip,"Shelly.GetConfig",auth=True)
+        if not any(PLUG_UI.fullmatch(key) for key in config):
+            # Some firmware versions expose the LED component via its own getter.
+            for method in (await self.rpc(ip, "Shelly.ListMethods", auth=True)).get("methods", []):
+                namespace, _, action = method.partition(".")
+                if action == "GetConfig" and PLUG_UI.fullmatch(namespace):
+                    config[namespace.lower()] = await self.rpc(ip, method, auth=True)
+        settings, skipped = template_settings(config)
         mqtt = config["mqtt"]
         return dict(ssid=config["wifi"]["sta"]["ssid"],broker=mqtt.get("server"),user=mqtt.get("user"),
                     tls=mqtt.get("ssl_ca") or "off", initial_state=config["switch:0"]["initial_state"],
-                    area=src["area"], source_topic=mqtt.get("topic_prefix") or info["id"])
+                    area=src["area"], source_topic=mqtt.get("topic_prefix") or info["id"],
+                    settings=settings, skipped=skipped, model=info.get("model"))
+
+    async def apply_template_settings(self, job, info):
+        template = job["template"]
+        ip = job["ip"]
+        expected, warnings = [], []
+        restart = False
+        for key, entry in template["settings"].items():
+            namespace = entry["method"]
+            params = {"id": 0} if key == "switch:0" else {}
+            source = entry["config"]
+            try:
+                current = await self.rpc(ip, namespace + ".GetConfig", params)
+                selected = compatible_settings(source, current)
+                if key == "switch:0" and (not template["model"] or template["model"] != info.get("model")):
+                    selected = {field: value for field, value in selected.items() if field not in SWITCH_PROTECTION}
+                unavailable = sorted(setting_values(source, key).keys() - setting_values(selected, key).keys())
+                warnings.extend(f"{path}: vom Zielgerät nicht übernommen." for path in unavailable)
+                if selected and compatible_settings(current, selected) != selected:
+                    response = await self.rpc(ip, namespace + ".SetConfig", {**params, "config": selected})
+                    restart |= bool(response.get("restart_required"))
+                if selected:
+                    expected.append((key, namespace, params, selected))
+            except (ValueError, TimeoutError, aiohttp.ClientError) as error:
+                warnings.append(f"{key}: {error or type(error).__name__}")
+        return restart, expected, warnings
+
+    async def verify_template_settings(self, ip, expected, warnings):
+        confirmed = []
+        for key, namespace, params, settings in expected:
+            try:
+                actual = await self.rpc(ip, namespace + ".GetConfig", params)
+                readback = setting_values(actual, key)
+                for path, value in setting_values(settings, key).items():
+                    if path in readback and value == readback[path]:
+                        confirmed.append(path)
+                    else:
+                        warnings.append(f"{path}: Zielwert konnte nicht bestätigt werden.")
+            except (ValueError, TimeoutError, aiohttp.ClientError) as error:
+                warnings.append(f"{key}: Kontrolle fehlgeschlagen ({error or type(error).__name__}).")
+        return sorted(confirmed)
 
     async def identify(self, ip, expected):
         info = await self.rpc(ip, "Shelly.GetDeviceInfo")
@@ -251,6 +300,9 @@ class Assistant:
                         raise ValueError("Firmwareversion noch nicht bestätigt.")
                 self.phase(job,"MQTT")
             if job["step"] == "MQTT":
+                restart, expected, warnings = False, [], []
+                if "template" in job:
+                    restart, expected, warnings = await self.apply_template_settings(job, info)
                 if p["tls"]=="user_ca.pem":
                     cert = opt["ca_pem"].strip()+"\n"
                     for offset in range(0,len(cert),1000):
@@ -260,7 +312,7 @@ class Assistant:
                 res = await self.rpc(ip,"MQTT.SetConfig",{"config":{"enable":True,"server":p["broker"],
                     "user":p["user"] or None,"pass":opt["mqtt_password"],"ssl_ca":None if p["tls"]=="off" else p["tls"],
                     "topic_prefix":p["topic"],"client_id":info["id"],"enable_control":True,"enable_rpc":True,"rpc_ntf":True,"status_ntf":True}})
-                if res.get("restart_required"):
+                if restart or res.get("restart_required"):
                     await self.rpc(ip,"Shelly.Reboot")
                     await asyncio.sleep(7)
                 for _ in range(25):
@@ -273,6 +325,9 @@ class Assistant:
                     await asyncio.sleep(2)
                 else:
                     raise ValueError("Keine Brokerverbindung. DNS, TLS, Zugang und ACL prüfen.")
+                if "template" in job:
+                    job["template_confirmed"] = await self.verify_template_settings(ip, expected, warnings)
+                    job["template_warnings"] = warnings
                 self.phase(job,"Discovery")
             if job["step"]=="Discovery":
                 config = await self.rpc(ip,"Shelly.GetConfig")
@@ -390,12 +445,17 @@ class Assistant:
         busy = self.task and not self.task.done()
         if action=="state":
             return dict(aps=[a for a in self.aps if a not in self.db["ignored"] and FACTORY.fullmatch(a)[1].lower() not in jobs],
-                        ignored=list(self.db["ignored"]),notice=self.notice,jobs=jobs,busy=bool(busy),
+                        ignored=list(self.db["ignored"]),notice=self.notice,
+                        jobs={mac: {key: value for key, value in job.items() if key != "template"} for mac, job in jobs.items()},
+                        busy=bool(busy),
                         backups=list(self.db["backups"]),profile={k:self.options[k] for k in ("ssid","broker","tls","mqtt_user")})
         if action=="inventory":
             return await self.inventory()
         if action=="template":
-            return await self.template(d)
+            template = await self.template(d)
+            settings = template.pop("settings")
+            template["field_paths"] = sorted(path for key, entry in settings.items() for path in setting_values(entry["config"], key))
+            return template
         if busy:
             raise ValueError("Eine Einrichtung läuft bereits.")
         if action=="discard":
@@ -440,6 +500,7 @@ class Assistant:
                     ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).load_verify_locations(cadata=self.options["ca_pem"])
                 except (ssl.SSLError, ValueError) as e:
                     raise ValueError("Gültiges PEM-CA-Zertifikat im lokalen Profil hinterlegen.") from e
+            template = None
             if d.get("source"):
                 template = await self.template({"source":d["source"],"ip":d.get("source_ip","")})
                 if template["source_topic"]==p["topic"]:
@@ -451,6 +512,9 @@ class Assistant:
             if any(mac in s["macs"] or root_id in s["identifiers"] for s in inv["sources"]):
                 raise ValueError("Dieser Plug ist bereits in HA registriert.")
             job = dict(mac=mac,ip=ip,ap=ap,plan=p,step=step,error="",entity="")
+            if template is not None:
+                job["template"] = {"settings": template["settings"], "model": template["model"]}
+                job["template_skipped"] = template["skipped"]
             jobs[mac] = job
             self.save()
             self.task = asyncio.create_task(self.run(job))

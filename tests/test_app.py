@@ -185,6 +185,62 @@ class Workflow(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(configs[script], original[script])
         self.assertIn(new, str(configs[automation]))
 
+    async def test_template_copies_led_off_and_checks_the_target(self):
+        source_ip, target_ip = "192.168.1.5", "192.168.1.12"
+        source_config = {
+            "wifi": {"sta": {"ssid": "IoT", "ip": source_ip, "pass": "source-secret"}},
+            "mqtt": {"server": "broker:8883", "user": "plug", "pass": "source-secret"},
+            "switch:0": {"initial_state": "off", "auto_off": False, "current_limit": 12},
+            "sys": {"device": {"name": "Vorlage", "mac": MAC, "eco_mode": True}},
+        }
+        source_ui = {"leds": {"mode": "off", "night_mode": {"enable": False}}}
+        target = {
+            "Switch": {"auto_off": True, "current_limit": 10},
+            "PLUGS_UI": {"leds": {"mode": "switch", "night_mode": {"enable": True}}},
+            "Sys": {"device": {"name": "Ziel", "eco_mode": False}},
+        }
+        self.app.inventory = AsyncMock(return_value={
+            "sources": [{"id": "source", "ip": source_ip, "macs": [MAC], "area": "kitchen"}]
+        })
+
+        async def rpc(ip, method, params=None, auth=False):
+            if ip == source_ip:
+                return {
+                    "Shelly.GetDeviceInfo": INFO,
+                    "Shelly.GetConfig": source_config,
+                    "Shelly.ListMethods": {"methods": ["PLUGS_UI.GetConfig", "PLUGS_UI.SetConfig"]},
+                    "PLUGS_UI.GetConfig": source_ui,
+                }[method]
+            self.assertEqual(ip, target_ip)
+            namespace, action = method.split(".")
+            if action == "SetConfig":
+                target[namespace].update(params["config"])
+                return {"restart_required": namespace == "Sys"}
+            return target[namespace]
+
+        self.app.rpc = AsyncMock(side_effect=rpc)
+        data = {"source": "source", "ip": source_ip}
+        preview = await self.app.action("template", data)
+        self.assertIn("plugs_ui.leds.mode", preview["field_paths"])
+        self.assertIn("wifi.sta.ip", preview["skipped"])
+        self.assertNotIn("source-secret", str(preview))
+        template = await self.app.template(data)
+        self.job.update(ip=target_ip, template=template)
+        restart, expected, warnings = await self.app.apply_template_settings(
+            self.job, {**INFO, "model": "Anderes Plug-Modell"}
+        )
+
+        self.assertTrue(restart)
+        self.assertEqual(target["PLUGS_UI"], source_ui)
+        self.assertFalse(target["Switch"]["auto_off"])
+        self.assertEqual(target["Switch"]["current_limit"], 10)
+        self.assertIn("switch:0.current_limit", warnings[0])
+        self.assertNotIn("source-secret", str(template))
+        self.assertIn("plugs_ui.leds.mode", await self.app.verify_template_settings(target_ip, expected, warnings))
+        target["PLUGS_UI"] = {"leds": {"mode": "switch"}}
+        self.assertNotIn("plugs_ui.leds.mode", await self.app.verify_template_settings(target_ip, expected, warnings))
+        self.assertTrue(any("plugs_ui.leds.mode" in warning for warning in warnings))
+
     async def test_discovery_retry(self):
         self.job.update(step="Discovery",ip="192.168.1.12")
         self.app.rpc=AsyncMock(side_effect=lambda ip,method,*args: CONFIG if method=="Shelly.GetConfig" else INFO)

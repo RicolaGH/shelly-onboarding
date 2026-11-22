@@ -1,4 +1,4 @@
-# Shelly Onboarding 0.1.2
+# Shelly Onboarding 0.1.3
 
 Eigenständige Home-Assistant-OS-App für WLAN-Steckdosen mit Shelly-RPC, einem Schaltausgang und einer Gerätekennung mit „Plug“ im App-Namen. Der Assistent erkennt Werks-WLANs, kopiert kompatible Einstellungen einer registrierten Vorlage und legt einen MQTT-Schalter an. Die MQTT-Integration in HA und ein erreichbarer Broker werden vorausgesetzt.
 
@@ -19,6 +19,7 @@ Eigenständige Home-Assistant-OS-App für WLAN-Steckdosen mit Shelly-RPC, einem 
 
 ## Unterbrechungen und Grenzen
 
+- Die Vorlage übernimmt kompatible Geräteeinstellungen für LED-Anzeige und Nachtmodus, Tasten, Schaltausgang, Gerätesuche, Standort, Zeitserver, Bluetooth, Cloud und Matter. Die App liest die übertragenen Werte am Ziel zurück und zeigt bestätigte, ausgelassene und fehlgeschlagene Felder. Elektrische Schutzgrenzen werden nur beim selben Gerätemodell übernommen. Gerätename und MQTT-Topic werden neu vergeben, Zugangsdaten und Zertifikat stammen aus dem lokalen App-Profil. Gerätegebundene IP-Einstellungen, Kopplungen, Skripte, Zeitpläne und Webhooks bleiben außerhalb der Übernahme.
 - Nach einem Abbruch „Fortsetzen“ wählen. Falls der Plug schon dem Zielnetz beigetreten ist, seine DHCP-Adresse eingeben. Die App prüft die MAC vor dem Fortsetzen. War das WLAN-Passwort falsch, das lokale Profil korrigieren, neu starten und mit leerem IP-Feld wiederholen.
 - Die MAC-Prüfung schützt vor versehentlicher Verwechslung. Werks-AP und lokale HTTP-RPC bieten beim erstmaligen Einrichten keine kryptografische Geräteauthentifizierung. Nur eigene, physisch zuordenbare Geräte in vertrauenswürdiger Funkumgebung provisionieren.
 - Discovery verwendet den Originalgenerator des Gerätewechsel-Tools 0.3.20. Er erzeugt modellabhängig Schalter, Messwerte und Diagnoseentitäten. Modell und Gerätekonfiguration müssen vom mitgelieferten Gen2+-Generator unterstützt werden. Ein lokaler Statusabruf alle zwei Minuten aktualisiert die Diagnose. Die zugehörigen Lizenzen und Quellrevisionen stehen unter device_migrator/vendor. Keine Migration eines bereits registrierten Plugs. Ein als Vorlage verwendeter Plug bleibt separat steuerbar.

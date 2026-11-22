@@ -9,7 +9,7 @@
 <div class="grid"><label>Neuer Gerätename<input name="name" required></label><label>Bereich<select name="area"></select></label></div>
 <label>MQTT-Topic-Basis<input name="base" required placeholder="shellies/EG/Kueche/Weihnachtsstern"></label>
 <div class="grid"><label>Ziel-SSID<input name="ssid" required></label><label>MQTT-Broker<input name="broker" required placeholder="mqtt.example:8883" aria-describedby="brokerPorts"><small id="brokerPorts">Standardports für MQTT: 1883 ohne Verschlüsselung, 8883 mit Verschlüsselung (TLS).</small></label><label>MQTT-Benutzer<input name="user"></label><label>TLS<select name="tls"><option>user_ca.pem</option><option>ca.pem</option><option>off</option></select></label><label>Nach Stromausfall<select name="initial_state"><option value="off">Aus</option><option value="on">Ein</option><option value="restore_last">Letzten Zustand herstellen</option></select></label></div>
-<label><span><input type="checkbox" id="suffix" checked> MAC für ein eindeutiges Topic anhängen</span></label><small id="origin"></small><p id="preview"></p><button class="primary">Einstellungen bestätigen und einrichten</button></form></section>
+<label><span><input type="checkbox" id="suffix" checked> MAC für ein eindeutiges Topic anhängen</span></label><small id="origin"></small><div id="templateSummary"></div><p id="preview"></p><button class="primary">Einstellungen bestätigen und einrichten</button></form></section>
 <section><h2>Einrichtungen</h2><div id="jobs"></div></section>
 <section id="finish" hidden><h2 id="finishTitle"></h2><label>Label für den neuen Schalter<select id="labels"></select></label><button id="addLabel">Label zuweisen</button><label>Bestehenden Schalter als Vorbild auswählen<select id="old"></select></label><button id="inspect">Automationen und Skripte prüfen</button><div id="effects"></div></section><div id="undos"></div></main>
 <script>
@@ -24,7 +24,7 @@ function options(sel,rows){sel.replaceChildren(...rows.map(([val,name])=>new Opt
 function source(){return inv.sources.find(s=>s.id===$('src').value)}
 function mac(){return (ap?ap.split('-').pop():fields.expected.value).replace(/[:-]/g,'').toLowerCase()}
 function preview(){ $('preview').textContent='Vollständiges Topic: '+fields.base.value+($('suffix').checked?'-'+(mac()||'MAC'):'') }
-function defaults(){let p=state.profile;Object.assign(fields.ssid,{value:p.ssid});fields.user.value=p.mqtt_user;fields.broker.value=p.broker;fields.tls.value=p.tls;fields.initial_state.value='off';fields.area.value='';sourceRead='';$('origin').textContent='WLAN, Broker und Zugang aus dem lokalen App-Profil. Zugangsdaten in der App-Konfiguration ändern.'}
+function defaults(){let p=state.profile;Object.assign(fields.ssid,{value:p.ssid});fields.user.value=p.mqtt_user;fields.broker.value=p.broker;fields.tls.value=p.tls;fields.initial_state.value='off';fields.area.value='';sourceRead='';$('templateSummary').replaceChildren();$('origin').textContent='WLAN, Broker und Zugang aus dem lokalen App-Profil. Zugangsdaten in der App-Konfiguration ändern.'}
 async function openForm(ssid,clone){inv=await api('inventory');ap=ssid;form.reset();$('wizard').hidden=false;$('heading').textContent=ssid||'Plug im Zielnetz';$('manualFields').hidden=!!ssid;
 options($('src'),[['','Ohne Vorlage'],...inv.sources.map(s=>[s.id,s.name+' · '+(s.model||'Shelly')])]);options(fields.area,[['','Kein Bereich'],...inv.areas.map(a=>[a.area_id,a.name])]);defaults();$('templateBox').hidden=true;
 if(clone){if(!inv.sources.length)throw Error('Keine Shelly-Vorlagen in HA gefunden.');$('src').selectedIndex=1;sourceChange()}
@@ -32,7 +32,23 @@ preview();$('wizard').scrollIntoView()}
 function sourceChange(){defaults();const s=source();$('templateBox').hidden=!s;$('srcIp').value=s?.ip||''}
 $('src').onchange=sourceChange;
 $('load').onclick=guard(async()=>{const s=source();const p=await api('template',{source:s.id,ip:$('srcIp').value});for(const k of ['ssid','broker','user','tls','initial_state','area'])fields[k].value=p[k]||'';
-fields.base.value=(p.source_topic||'shellies').split('/').slice(0,-1).concat(['neuer-plug']).join('/');sourceRead=s.id;preview();$('origin').textContent='WLAN, MQTT und Einschaltverhalten aus '+s.name+' gelesen. Passwörter und CA kommen aus dem lokalen Profil.'});
+fields.base.value=(p.source_topic||'shellies').split('/').slice(0,-1).concat(['neuer-plug']).join('/');sourceRead=s.id;preview();$('origin').textContent='WLAN, MQTT und Einschaltverhalten aus '+s.name+' gelesen. Passwörter und CA kommen aus dem lokalen Profil.';
+showTemplateSettings($('templateSummary'), [
+    ['Am Ziel auf Kompatibilität prüfen', p.field_paths],
+    ['Aus der Vorlage ausgelassen', p.skipped]
+]);});
+function showTemplateSettings(container, groups){
+    container.replaceChildren();
+    for(const [title, fields] of groups){
+        if(!fields?.length)continue;
+        const details=element('details','');
+        details.append(element('summary', title+' ('+fields.length+')'));
+        const list=element('ul','');
+        for(const field of fields)list.append(element('li',field));
+        details.append(list);
+        container.append(details);
+    }
+}
 $('suffix').onchange=preview;fields.base.oninput=fields.expected.oninput=preview;
 form.onsubmit=guard(async()=>{if(source()&&sourceRead!==source().id)throw Error('Vorlage zuerst lesen.');const data=Object.fromEntries(new FormData(form));data.ap=ap;data.expected=mac();data.topic=data.base+($('suffix').checked?'-'+mac():'');data.source=$('src').value;data.source_ip=$('srcIp').value;await api('start',data);sessionStorage.setItem('started',data.expected);$('wizard').hidden=true;await refresh()});
 async function finish(j){inv=await api('inventory');selected=j.mac;$('finish').hidden=false;$('finishTitle').textContent=j.plan.name+' in Automationen aufnehmen';options($('labels'), inv.labels.map(l=>[l.label_id,l.name]));const christmas=inv.labels.find(l=>l.name.toLowerCase()==='weihnachten');if(christmas)$('labels').value=christmas.label_id;
@@ -89,7 +105,16 @@ $('old').onchange=()=>$('effects').replaceChildren();
 $('inspect').onclick=guard(inspect);$('manual').onclick=guard(()=>openForm('',false));$('scan').onclick=guard(async()=>{await api('scan');await refresh()});
 async function refresh(){if(loading)return;loading=true;try{state=await api('state');$('notice').textContent=state.notice;$('aps').replaceChildren();for(const ssid of state.aps){const row=element('article','');row.append(element('strong',ssid),element('br',''),button('Neu einrichten',()=>openForm(ssid,false)),button('Nach Vorlage',()=>openForm(ssid,true)),button('Ignorieren',async()=>{await api('ignore',{ap:ssid});await refresh()}));$('aps').append(row)}if(!state.aps.length)$('aps').textContent='Aktuell kein neuer Shelly in Funkreichweite.';
 $('ignored').replaceChildren(...state.ignored.map(ap=>button(ap+' wieder anzeigen',async()=>{await api('ignore',{ap});await refresh()})));
-$('jobs').replaceChildren();for(const j of Object.values(state.jobs).reverse()){if(j.step==='Fertig'&&!prompted.has(j.mac)){prompted.add(j.mac);if(sessionStorage.getItem('started')===j.mac){sessionStorage.removeItem('started');await finish(j)}}const row=element('article','');row.append(element('strong',j.plan.name),element('p',[j.step,j.ip,j.entity,j.error].filter(Boolean).join(' · ')));if(j.step==='Fertig')row.append(button('Label und Automationen …',()=>finish(j)));else if(!state.busy)row.append(button('Fortsetzen',async()=>{const ip=prompt('Optional neue Ziel-IP eingeben. Leer = gespeicherten Schritt wiederholen.',j.ip||'');if(ip!==null){await api('resume',{mac:j.mac,ip});await refresh()}}),button('Vorgang verwerfen',async()=>{if(confirm('Lokalen Vorgang verwerfen? Bereits geschriebene Geräteeinstellungen bleiben aktiv.')){await api('discard',{mac:j.mac});await refresh()}}));$('jobs').append(row)}
+$('jobs').replaceChildren();for(const j of Object.values(state.jobs).reverse()){if(j.step==='Fertig'&&!prompted.has(j.mac)){prompted.add(j.mac);if(sessionStorage.getItem('started')===j.mac){sessionStorage.removeItem('started');await finish(j)}}const row=element('article','');row.append(element('strong',j.plan.name),element('p',[j.step,j.ip,j.entity,j.error].filter(Boolean).join(' · ')));if(j.template_skipped){
+    const details=element('div','');
+    showTemplateSettings(details,[
+        ['Am Ziel bestätigt',j.template_confirmed],
+        ['Bitte prüfen',j.template_warnings],
+        ['Aus der Vorlage ausgelassen',j.template_skipped]
+    ]);
+    row.append(details);
+}
+if(j.step==='Fertig')row.append(button('Label und Automationen …',()=>finish(j)));else if(!state.busy)row.append(button('Fortsetzen',async()=>{const ip=prompt('Optional neue Ziel-IP eingeben. Leer = gespeicherten Schritt wiederholen.',j.ip||'');if(ip!==null){await api('resume',{mac:j.mac,ip});await refresh()}}),button('Vorgang verwerfen',async()=>{if(confirm('Lokalen Vorgang verwerfen? Bereits geschriebene Geräteeinstellungen bleiben aktiv.')){await api('discard',{mac:j.mac});await refresh()}}));$('jobs').append(row)}
 $('undos').replaceChildren(...state.backups.map(key=>button('Änderung zurücknehmen · '+key.split(':').pop(),async()=>{await api('undo',{key});await refresh()})))}finally{loading=false}}
 guard(refresh)();setInterval(guard(refresh),5000);
 </script></html>
