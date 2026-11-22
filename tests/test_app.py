@@ -115,6 +115,9 @@ class Workflow(unittest.IsolatedAsyncioTestCase):
         target = None
         methods = []
 
+        async def sleep(seconds):
+            methods.append(f"sleep:{seconds}")
+
         async def rpc(ip, method, params=None):
             nonlocal installed, target
             methods.append(method)
@@ -133,7 +136,7 @@ class Workflow(unittest.IsolatedAsyncioTestCase):
 
         self.app.rpc = AsyncMock(side_effect=rpc)
         self.app.call = AsyncMock(return_value={"state": "off"})
-        with patch("app.asyncio.sleep", new=AsyncMock()):
+        with patch("app.asyncio.sleep", new=sleep):
             await self.app.run(self.job)
 
         self.assertEqual(self.job["step"], "Fertig", self.job["error"])
@@ -141,6 +144,9 @@ class Workflow(unittest.IsolatedAsyncioTestCase):
         before_mqtt = methods[:methods.index("MQTT.SetConfig")]
         self.assertEqual(before_mqtt.count("Shelly.CheckForUpdate"), 3)
         self.assertEqual(before_mqtt.count("Shelly.Update"), 2)
+        for index, method in enumerate(before_mqtt):
+            if method == "Shelly.Update":
+                self.assertEqual(before_mqtt[index + 1:index + 3], ["sleep:30", "Shelly.GetDeviceInfo"])
 
     async def test_bulk_effects_preflight_and_individual_undo(self):
         old, new = "switch.reference", "switch.stern"

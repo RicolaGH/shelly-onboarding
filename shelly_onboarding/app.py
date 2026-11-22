@@ -237,8 +237,10 @@ class Assistant:
                         raise ValueError(f"Shelly meldet Firmware {version} erneut. Bitte später fortsetzen.")
                     attempted_versions.add(version)
                     await self.rpc(ip,"Shelly.Update",{"stage":"stable"})
-                    for _ in range(55):
-                        await asyncio.sleep(3)
+                    await asyncio.sleep(30)
+                    for attempt in range(55):
+                        if attempt:
+                            await asyncio.sleep(3)
                         try:
                             info = await self.identify(ip,job["mac"])
                         except (ValueError,TimeoutError,aiohttp.ClientError):
