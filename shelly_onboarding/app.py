@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import ssl
+from time import time
 from urllib.parse import quote, urlsplit
 
 import aiohttp
@@ -386,6 +387,7 @@ class Assistant:
                                 await self.identify(ip,job["mac"])
                                 await self.rpc(ip,"WiFi.SetConfig",{"config":{"ap":{"enable":False}}})
                             job["entity"] = entity["entity_id"]
+                            job["completed_at"] = time()
                             self.phase(job,"Fertig")
                             break
                 else:

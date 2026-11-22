@@ -56,13 +56,13 @@ code{font-size:.86em;overflow-wrap:anywhere}
 <section><h2>Neue Plugs</h2><div id="aps"></div><button id="scan">WLAN durchsuchen</button><button id="manual">Über Ziel-IP einrichten</button><div id="ignored"></div><small id="notice"></small></section>
 <section id="wizard" hidden><h2 id="heading"></h2><form id="form">
 <div id="manualFields" class="grid"><label>Ziel-IP<input name="ip" placeholder="192.168.…"></label><label>MAC laut Gerät<input name="expected" placeholder="12 Hex-Zeichen"></label></div>
-<label>Vorlage<select id="src"></select></label><div id="templateBox" hidden><label>IP der Vorlage<input id="srcIp"></label><button type="button" id="load">Gerätekonfiguration lesen</button></div>
+<label>Vorlagen suchen<input type="search" id="srcSearch" placeholder="Name oder Modell" aria-controls="src"></label><label>Vorlage<select id="src"></select></label><div id="templateBox" hidden><label>IP der Vorlage<input id="srcIp"></label><button type="button" id="load">Gerätekonfiguration lesen</button></div>
 <div class="grid"><label>Neuer Gerätename<input name="name" required></label><label>Bereich<select name="area"></select></label></div>
 <label>MQTT-Topic-Basis<input name="base" required placeholder="shellies/EG/Kueche/Weihnachtsstern"></label>
 <div class="grid"><label>Ziel-SSID<input name="ssid" required></label><label>MQTT-Broker<input name="broker" required placeholder="mqtt.example:8883" aria-describedby="brokerPorts"><small id="brokerPorts">Standardports für MQTT: 1883 ohne Verschlüsselung, 8883 mit Verschlüsselung (TLS).</small></label><label>MQTT-Benutzer<input name="user"></label><label>TLS<select name="tls"><option>user_ca.pem</option><option>ca.pem</option><option>off</option></select></label><label>Nach Stromausfall<select name="initial_state"><option value="off">Aus</option><option value="on">Ein</option><option value="restore_last">Letzten Zustand herstellen</option></select></label></div>
 <label><span><input type="checkbox" id="suffix" checked> MAC für ein eindeutiges Topic anhängen</span></label><small id="origin"></small><div id="templateSummary"></div><p id="preview"></p><button class="primary">Einstellungen bestätigen und einrichten</button></form></section>
 <section id="active" aria-label="Offene Einrichtungen"></section>
-<section id="finish" hidden><div class="finish-header"><h2 id="finishTitle"></h2><button id="closeFinish">Schließen</button></div><label>Label für den neuen Schalter<select id="labels"></select></label><button id="addLabel">Label zuweisen</button><label>Bestehenden Schalter als Vorbild auswählen<select id="old"></select></label><button id="inspect">Automationen und Skripte prüfen</button><div id="effects"></div></section><section id="history" hidden>
+<section id="finish" hidden><div class="finish-header"><h2 id="finishTitle"></h2><button id="closeFinish">Schließen</button></div><label>Label für den neuen Schalter<select id="labels"></select></label><button id="addLabel">Label zuweisen</button><label>Vorbilder suchen<input type="search" id="oldSearch" placeholder="Name oder Entität" aria-controls="old"></label><label>Bestehenden Schalter als Vorbild auswählen<select id="old"></select></label><button id="inspect">Automationen und Skripte prüfen</button><div id="effects"></div></section><section id="history" hidden>
 <div class="history-tools"><h2 id="historyTitle">Abgeschlossene Einrichtungen</h2><input id="jobSearch" type="search" placeholder="Gerät suchen" aria-label="Abgeschlossene Einrichtungen durchsuchen"></div>
 <div id="jobs" class="job-list"></div><button id="showMore" hidden>Mehr anzeigen</button>
 </section></main>
@@ -74,16 +74,59 @@ function button(text,fn){const b=element('button',text);b.type='button';b.onclic
 function guard(fn){return async e=>{e?.preventDefault();$('msg').textContent='';try{await fn()}catch(err){$('msg').textContent=err.message;window.scrollTo(0,0)}}}
 async function api(key,body={}){const res=await fetch('api/'+key,{method:'POST',headers:{'Content-Type':'application/json','X-Onboarding':'1'},body:JSON.stringify(body)});const data=await res.json();if(!res.ok)throw Error(data.error||res.statusText);return data}
 function options(sel,rows){sel.replaceChildren(...rows.map(([val,name])=>new Option(name,val)))}
+const nameOrder=new Intl.Collator('de',{sensitivity:'base',numeric:true});
+function searchKey(value){
+    return value.toLowerCase().normalize('NFD').replace(/\p{M}/gu,'').replace(/ß/g,'ss');
+}
+function renderReferences(select, search, excludedEntity=null){
+    const switches=select.id==='old';
+    const previous=select.value;
+    const entries=inv.sources.flatMap(device=>{
+        const name=device.name||device.model||device.id;
+        const choices=switches?device.switches.filter(entity=>entity!==excludedEntity):[device.id];
+        return choices.map(value=>({
+            device,value,name,label:name+' · '+(switches?value:device.model||'Shelly')
+        }));
+    });
+    entries.sort((a,b)=>nameOrder.compare(a.name,b.name)||nameOrder.compare(a.label,b.label));
+    const byMac=new Map(), byEntity=new Map();
+    for(const {device} of entries){
+        for(const mac of device.macs)byMac.set(mac,device.id);
+        for(const entity of device.switches)byEntity.set(entity,device.id);
+    }
+    const completed=Object.values(state.jobs).reverse().filter(job=>job.step==='Fertig');
+    completed.sort((a,b)=>(b.completed_at||0)-(a.completed_at||0));
+    const recent=[...new Set(completed.map(job=>byEntity.get(job.entity)||byMac.get(job.mac)).filter(Boolean))].slice(0,3);
+    const query=searchKey(search.value.trim());
+    const matching=entries.filter(entry=>searchKey(entry.label).includes(query));
+    const selectedEntry=entries.find(entry=>entry.value===previous);
+    const placeholder=query&&!matching.length?'Keine Treffer':switches?'Vorbild auswählen':'Ohne Vorlage';
+    select.replaceChildren(new Option(placeholder,''));
+    function addGroup(label, rows){
+        if(!rows.length)return;
+        const group=element('optgroup','');
+        group.label=label;
+        group.append(...rows.map(entry=>new Option(entry.label,entry.value)));
+        select.append(group);
+    }
+    addGroup('Zuletzt eingerichtet',recent.flatMap(id=>matching.filter(entry=>entry.device.id===id)));
+    addGroup('Alphabetisch',matching.filter(entry=>!recent.includes(entry.device.id)));
+    if(selectedEntry&&!matching.includes(selectedEntry))addGroup('Ausgewählt',[selectedEntry]);
+    select.value=selectedEntry?previous:'';
+}
+
 function source(){return inv.sources.find(s=>s.id===$('src').value)}
 function mac(){return (ap?ap.split('-').pop():fields.expected.value).replace(/[:-]/g,'').toLowerCase()}
 function preview(){ $('preview').textContent='Vollständiges Topic: '+fields.base.value+($('suffix').checked?'-'+(mac()||'MAC'):'') }
 function defaults(){let p=state.profile;Object.assign(fields.ssid,{value:p.ssid});fields.user.value=p.mqtt_user;fields.broker.value=p.broker;fields.tls.value=p.tls;fields.initial_state.value='off';fields.area.value='';sourceRead='';$('templateSummary').replaceChildren();$('origin').textContent='WLAN, Broker und Zugang aus dem lokalen App-Profil. Zugangsdaten in der App-Konfiguration ändern.'}
 async function openForm(ssid,clone){inv=await api('inventory');ap=ssid;form.reset();$('wizard').hidden=false;$('heading').textContent=ssid||'Plug im Zielnetz';$('manualFields').hidden=!!ssid;
-options($('src'),[['','Ohne Vorlage'],...inv.sources.map(s=>[s.id,s.name+' · '+(s.model||'Shelly')])]);options(fields.area,[['','Kein Bereich'],...inv.areas.map(a=>[a.area_id,a.name])]);defaults();$('templateBox').hidden=true;
+$('src').value='';$('srcSearch').value='';renderReferences($('src'),$('srcSearch'));options(fields.area,[['','Kein Bereich'],...inv.areas.map(a=>[a.area_id,a.name])]);defaults();$('templateBox').hidden=true;
 if(clone){if(!inv.sources.length)throw Error('Keine Shelly-Vorlagen in HA gefunden.');$('src').selectedIndex=1;sourceChange()}
 preview();$('wizard').scrollIntoView()}
 function sourceChange(){defaults();const s=source();$('templateBox').hidden=!s;$('srcIp').value=s?.ip||''}
 $('src').onchange=sourceChange;
+$('srcSearch').oninput=()=>renderReferences($('src'),$('srcSearch'));
+$('srcSearch').onkeydown=event=>{if(event.key==='Enter')event.preventDefault()};
 $('load').onclick=guard(async()=>{const s=source();const p=await api('template',{source:s.id,ip:$('srcIp').value});for(const k of ['ssid','broker','user','tls','initial_state','area'])fields[k].value=p[k]||'';
 fields.base.value=(p.source_topic||'shellies').split('/').slice(0,-1).concat(['neuer-plug']).join('/');sourceRead=s.id;preview();$('origin').textContent='WLAN, MQTT und Einschaltverhalten aus '+s.name+' gelesen. Passwörter und CA kommen aus dem lokalen Profil.';
 showTemplateSettings($('templateSummary'), [
@@ -105,7 +148,8 @@ function showTemplateSettings(container, groups){
 $('suffix').onchange=preview;fields.base.oninput=fields.expected.oninput=preview;
 form.onsubmit=guard(async()=>{if(source()&&sourceRead!==source().id)throw Error('Vorlage zuerst lesen.');const data=Object.fromEntries(new FormData(form));data.ap=ap;data.expected=mac();data.topic=data.base+($('suffix').checked?'-'+mac():'');data.source=$('src').value;data.source_ip=$('srcIp').value;await api('start',data);sessionStorage.setItem('started',data.expected);$('wizard').hidden=true;await refresh()});
 async function finish(j){inv=await api('inventory');selected=j.mac;$('finish').hidden=false;$('finishTitle').textContent=j.plan.name+' in Automationen aufnehmen';options($('labels'), inv.labels.map(l=>[l.label_id,l.name]));const christmas=inv.labels.find(l=>l.name.toLowerCase()==='weihnachten');if(christmas)$('labels').value=christmas.label_id;
-options($('old'),inv.sources.flatMap(s=>s.switches.filter(e=>e!==j.entity).map(e=>[e,s.name+' · '+e])));$('effects').replaceChildren();$('finish').scrollIntoView({block:'start'})}
+$('old').value='';$('oldSearch').value='';renderReferences($('old'),$('oldSearch'),j.entity);
+if($('old').options.length>1)$('old').selectedIndex=1;$('effects').replaceChildren();$('finish').scrollIntoView({block:'start'})}
 $('closeFinish').onclick=()=>{$('finish').hidden=true;selected=''};
 $('addLabel').onclick=guard(async()=>{if(!$('labels').value)throw Error('Zuerst ein Label in HA anlegen.');await api('label',{mac:selected,label:$('labels').value});$('effects').textContent='Label zugewiesen.'});
 async function inspect(){
@@ -117,7 +161,7 @@ async function inspect(){
     box.replaceChildren(element('p',out.refs.length+' Treffer für '+state.jobs[mac].plan.name+'.'));
     const applicable=out.refs.filter(ref=>ref.changes.length);
     const apply=async refs=>{
-        const controls=[...box.querySelectorAll('button'),$('inspect'),$('old')];
+        const controls=[...box.querySelectorAll('button'),$('inspect'),$('old'),$('oldSearch')];
         controls.forEach(control=>control.disabled=true);
         try{
             const apply_all=Object.fromEntries(refs.map(ref=>[ref.path,ref.digest]));
@@ -161,6 +205,7 @@ async function inspect(){
     }
 }
 $('old').onchange=()=>$('effects').replaceChildren();
+$('oldSearch').oninput=()=>renderReferences($('old'),$('oldSearch'),state.jobs[selected]?.entity);
 $('inspect').onclick=guard(inspect);$('manual').onclick=guard(()=>openForm('',false));$('scan').onclick=guard(async()=>{await api('scan');await refresh()});
 const HISTORY_PAGE_SIZE=8;
 let visibleJobs=HISTORY_PAGE_SIZE, renderedJobs='';

@@ -1,7 +1,7 @@
 # shelly-onboarding
 HASS App for semi-automatical on boarding of new shellies by ricola
 
-# Shelly Onboarding 0.1.4
+# Shelly Onboarding 0.1.5
 
 Eigenständige Home-Assistant-OS-App für WLAN-Steckdosen mit Shelly-RPC, einem Schaltausgang und einer Gerätekennung mit „Plug“ im App-Namen. Der Assistent erkennt Werks-WLANs, kopiert kompatible Einstellungen einer registrierten Vorlage und legt einen MQTT-Schalter an. Die MQTT-Integration in HA und ein erreichbarer Broker werden vorausgesetzt.
 
